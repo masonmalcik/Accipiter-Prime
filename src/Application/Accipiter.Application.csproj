@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Core\Accipiter.Core.csproj" />
+  </ItemGroup>
+
+
+</Project>
