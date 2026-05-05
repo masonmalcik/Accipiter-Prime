@@ -15,8 +15,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Application\Accipiter.Application.csproj" />
-    <ProjectReference Include="..\src\Infrastructure\Accipiter.Infrastructure.csproj" />
+    <ProjectReference Include="..\Application\Accipiter.Application.csproj" />
+    <ProjectReference Include="..\Infrastructure\Accipiter.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
