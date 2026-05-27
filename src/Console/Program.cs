@@ -27,26 +27,6 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    //******************************************************************************
-
-    // Your 64-byte raw keypair array
-    byte[] keypairBytes = new byte[]
-    {
-            162,180,6,61,10,216,87,234,66,143,70,62,129,251,217,40,91,24,245,47,
-            38,170,130,206,3,118,254,51,172,19,85,148,221,15,2,118,132,227,179,
-            29,203,199,65,3,125,243,165,136,69,118,92,49,95,189,72,128,5,22,128,
-            238,137,11,208,198
-    };
-
-    // Convert to Base58 string
-    string base58Keypair = Encoders.Base58.EncodeData(keypairBytes);
-
-    Console.WriteLine(base58Keypair);
-    // Output will be your importable wallet string
-
-    //******************************************************************************
-
-
     var host = Host.CreateDefaultBuilder(args)
         .UseSerilog((ctx, services, cfg) =>
             cfg.ReadFrom.Configuration(ctx.Configuration))
