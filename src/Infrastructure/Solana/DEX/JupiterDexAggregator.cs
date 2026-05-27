@@ -78,6 +78,7 @@ namespace Accipiter.Infrastructure.Solana.DEX
                 {
                     var pairQuotes = await GetQuotesForPairAsync(pair, inputAmountUSDC, ct);
                     quotes.AddRange(pairQuotes);
+                    await Task.Delay(500, ct);
                 }
                 catch (Exception ex)
                 {

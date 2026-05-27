@@ -1,20 +1,25 @@
 ﻿using Accipiter.Application.Orchestration;
 using Accipiter.Application.Simulation;
 using Accipiter.Application.Strategies.CrossDex;
+using Accipiter.Application.Strategies.Triangular;
 using Accipiter.Core.Domain.Enums;
 using Accipiter.Core.Domain.Interfaces;
+using Accipiter.Infrastructure.Jito;
 using Accipiter.Infrastructure.Persistence;
+using Accipiter.Infrastructure.Persistence.Repoistories;
+using Accipiter.Infrastructure.Persistence.Repositories;
 using Accipiter.Infrastructure.SmartContracts;
 using Accipiter.Infrastructure.Solana.DEX;
 using Accipiter.Infrastructure.Solana.RPC;
+using Accipiter.Infrastructure.Yellowstone;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Accipiter.Infrastructure.Persistence.Repoistories;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
-using Accipiter.Infrastructure.Persistence.Repositories;
+using Solnet.Wallet;
+using Solnet.Wallet.Utilities;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -22,12 +27,40 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    //******************************************************************************
+
+    // Your 64-byte raw keypair array
+    byte[] keypairBytes = new byte[]
+    {
+            162,180,6,61,10,216,87,234,66,143,70,62,129,251,217,40,91,24,245,47,
+            38,170,130,206,3,118,254,51,172,19,85,148,221,15,2,118,132,227,179,
+            29,203,199,65,3,125,243,165,136,69,118,92,49,95,189,72,128,5,22,128,
+            238,137,11,208,198
+    };
+
+    // Convert to Base58 string
+    string base58Keypair = Encoders.Base58.EncodeData(keypairBytes);
+
+    Console.WriteLine(base58Keypair);
+    // Output will be your importable wallet string
+
+    //******************************************************************************
+
+
     var host = Host.CreateDefaultBuilder(args)
         .UseSerilog((ctx, services, cfg) =>
             cfg.ReadFrom.Configuration(ctx.Configuration))
         .ConfigureServices((ctx, services) =>
         {
             var config = ctx.Configuration;
+
+            services.AddSingleton<YellowstoneGrpcClient>();
+            services.AddSingleton<YellowstoneStreamHandler>();
+            services.AddSingleton<YellowstoneArbitrageWorker>();
+
+            // Jito bundle client
+            services.AddHttpClient<JitoBundleClient>();
+            services.Configure<JitoOptions>(config.GetSection("Jito"));
 
             // EF Core — SQL Server
             services.AddDbContext<AccipitersDbContext>((serviceProvider, opt) =>
@@ -50,13 +83,13 @@ try
             services.AddScoped<ISimulationRunRepository, SimulationRunRepository>();
 
             // Strategy routing — reads "Strategy:Active" from config
-            var activeStrategy = config["Strategy:Active"] ?? "CrossDex";
-            services.AddScoped<IArbitrageStrategy>(_ =>
+            var activeStrategy = config["Strategy:Active"] ?? "Triangular";
+            services.AddScoped<IArbitrageStrategy>(provider =>
                 activeStrategy switch
                 {
-                    "Triangular" => throw new NotImplementedException(
-                        "TriangularArbitrageStrategy is not yet implemented."),
-                    _ => ActivatorUtilities.CreateInstance<CrossDexArbitrageStrategy>(_)
+                    "Triangular" => ActivatorUtilities.CreateInstance<TriangularArbitrageStrategy>(provider),
+                    "CrossDex" => ActivatorUtilities.CreateInstance<CrossDexArbitrageStrategy>(provider),
+                    _ => throw new InvalidOperationException($"Unknown strategy: {activeStrategy}")
                 });
 
             // Core services
@@ -65,6 +98,7 @@ try
             services.AddScoped<SimulationEngine>();
             services.AddScoped<OpportunityScorer>();
             services.AddScoped<ArbitrageOrchestrator>();
+            services.AddScoped<CycleDetector>();
 
             // SmartContractClient is only registered in live mode
             var mode = Enum.Parse<ExecutionMode>(
@@ -75,7 +109,7 @@ try
             }
 
             // Background polling worker
-            services.AddHostedService<ArbitrageWorker>();
+            services.AddHostedService<YellowstoneArbitrageWorker>();
         })
         .Build();
 
@@ -114,29 +148,39 @@ finally
 // ============================================================
 // Background worker — drives the polling loop
 // ============================================================
-public sealed class ArbitrageWorker : BackgroundService
+public sealed class YellowstoneArbitrageWorker : BackgroundService
 {
     private readonly IServiceProvider _services;
+    private readonly YellowstoneGrpcClient _yellowstone;
     private readonly IConfiguration _config;
-    private readonly ILogger<ArbitrageWorker> _logger;
+    private readonly ILogger<YellowstoneArbitrageWorker> _logger;
 
-    public ArbitrageWorker(
+    // Debounce — don't process the same slot twice
+    private ulong _lastProcessedSlot = 0;
+
+    public YellowstoneArbitrageWorker(
         IServiceProvider services,
+        YellowstoneGrpcClient yellowstone,
         IConfiguration config,
-        ILogger<ArbitrageWorker> logger)
+        ILogger<YellowstoneArbitrageWorker> logger)
     {
         _services = services;
+        _yellowstone = yellowstone;
         _config = config;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var intervalMs = _config.GetValue<int>("Strategy:PollingIntervalMs", 2000);
-        _logger.LogInformation("Arbitrage worker started — polling every {Interval}ms", intervalMs);
+        _logger.LogInformation("Yellowstone arbitrage worker started");
 
-        while (!stoppingToken.IsCancellationRequested)
+        // Subscribe to pool account updates
+        _yellowstone.OnPoolUpdate += async update =>
         {
+            // Debounce — skip if we already processed this slot
+            if (update.Slot > 0 && update.Slot <= _lastProcessedSlot) return;
+            _lastProcessedSlot = update.Slot;
+
             try
             {
                 using var scope = _services.CreateScope();
@@ -145,18 +189,16 @@ public sealed class ArbitrageWorker : BackgroundService
 
                 await orchestrator.RunTickAsync(stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during arbitrage tick — continuing");
+                _logger.LogError(ex, "Error processing pool update from slot {Slot}",
+                    update.Slot);
             }
+        };
 
-            await Task.Delay(intervalMs, stoppingToken);
-        }
+        // Start the gRPC stream — this blocks until cancelled
+        await _yellowstone.StartStreamingAsync(stoppingToken);
 
-        _logger.LogInformation("Arbitrage worker stopped");
+        _logger.LogInformation("Yellowstone arbitrage worker stopped");
     }
 }
