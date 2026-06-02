@@ -25,6 +25,8 @@ namespace Accipiter.Application.Orchestration
         private readonly IOpportunityRepository _opportunityRepo;
         private readonly ILogger<ArbitrageOrchestrator> _logger;
         private readonly OrchestratorOptions _options;
+        private readonly CircuitBreaker _circuitBreaker;
+        private readonly ISolanaRpcClient _rpcClient;
 
         // Injected via DI — ISmartContractClient is null in simulation mode
         private readonly ISmartContractClient? _contractClient;
@@ -37,6 +39,8 @@ namespace Accipiter.Application.Orchestration
             IOpportunityRepository opportunityRepo,
             IOptions<OrchestratorOptions> options,
             ILogger<ArbitrageOrchestrator> logger,
+            CircuitBreaker circuitBreaker,
+            ISolanaRpcClient rpcClient,
             ISmartContractClient? contractClient = null)
         {
             _strategy = strategy;
@@ -47,28 +51,46 @@ namespace Accipiter.Application.Orchestration
             _logger = logger;
             _options = options.Value;
             _contractClient = contractClient;
+            _circuitBreaker = circuitBreaker;
         }
 
         public async Task RunTickAsync(CancellationToken ct)
         {
+            // Check circuit breaker before doing anything
+            if (!_circuitBreaker.CheckAndAllow())
+            {
+                var status = _circuitBreaker.GetStatus();
+                _logger.LogDebug(
+                    "Circuit breaker OPEN — skipping tick | " +
+                    "opened: {OpenedAt} | failures: {Failures}",
+                    status.OpenedAt, status.ConsecutiveFailures);
+                return;
+            }
+
             _logger.LogDebug("Orchestrator tick — mode: {Mode}", _options.Mode);
+
+            // Check wallet balance before trading
+            var wallet = await _rpcClient.GetWalletStateAsync(ct);
+            if (wallet.UsdcBalance < _options.MinWalletBalanceUSDC)
+            {
+                _logger.LogWarning(
+                    "Wallet balance {Balance:C} below minimum {Min:C} — skipping tick",
+                    wallet.UsdcBalance, _options.MinWalletBalanceUSDC);
+                _circuitBreaker.RecordFailure("Wallet balance below minimum");
+                return;
+            }
 
             var pairs = _options.WatchedPairs
                 .Select(p => new TokenPair(p.Base, p.Quote))
                 .ToList();
 
-            var quotes = await _aggregator.GetQuotesAsync(pairs, _options.TradeAmountUSDC, ct);
             var opportunities = await _strategy.ScanAsync(pairs, ct);
             var ranked = _scorer.Rank(opportunities);
 
             foreach (var opportunity in ranked)
             {
                 if (opportunity.EstimatedProfitUSDC < _options.MinProfitThresholdUSDC)
-                {
-                    _logger.LogDebug("Opportunity {Id} skipped — profit {Profit:C} below threshold",
-                        opportunity.Id, opportunity.EstimatedProfitUSDC);
                     continue;
-                }
 
                 await _opportunityRepo.SaveAsync(opportunity, ct);
 
@@ -116,7 +138,10 @@ namespace Accipiter.Application.Orchestration
         public ExecutionMode Mode { get; set; } = ExecutionMode.Simulation;
         public decimal TradeAmountUSDC { get; set; } = 100m;
         public decimal MinProfitThresholdUSDC { get; set; } = 0.5m;
+        public decimal MaxTradeAmountUSDC { get; set; } = 500m;
+        public decimal MinWalletBalanceUSDC { get; set; } = 20m;
         public int SlippageToleranceBps { get; set; } = 50;
+        public int PollingIntervalMs { get; set; } = 5000;
         public List<TokenPairConfig> WatchedPairs { get; set; } = [];
     }
 

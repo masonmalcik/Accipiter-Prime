@@ -37,6 +37,8 @@ try
             services.AddSingleton<YellowstoneGrpcClient>();
             services.AddSingleton<YellowstoneStreamHandler>();
             services.AddSingleton<YellowstoneArbitrageWorker>();
+            services.AddSingleton<CircuitBreaker>();
+            
 
             // Jito bundle client
             services.AddHttpClient<JitoBundleClient>();
@@ -57,6 +59,7 @@ try
 
             // Options
             services.Configure<OrchestratorOptions>(config.GetSection("Strategy"));
+            services.Configure<CircuitBreakerOptions>(config.GetSection("CircuitBreaker"));
 
             // Repositories
             services.AddScoped<IOpportunityRepository, OpportunityRepository>();
