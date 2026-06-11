@@ -34,10 +34,10 @@ namespace Accipiter.Application.Simulation
             ArbitrageOpportunity opportunity,
             CancellationToken ct = default)
         {
-            // Model slippage: reduce estimated output by half the bps
-            var slippageFactor = 1m - (opportunity.Route.EstimatedSlippageBps / 2m / 10_000m);
-            var adjustedOutput = opportunity.EstimatedOutputAmountUSDC * slippageFactor;
-            var netProfit = adjustedOutput - opportunity.InputAmountUSDC - opportunity.Route.TotalFeeEstimateUSDC;
+            // Jupiter quotes already include slippage — don't apply it again
+            var adjustedOutput = opportunity.EstimatedOutputAmountUSDC;
+            var netProfit = adjustedOutput - opportunity.InputAmountUSDC
+                            - opportunity.Route.TotalFeeEstimateUSDC;
 
             var result = new SimulationTradeResult
             {

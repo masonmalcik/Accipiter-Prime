@@ -45,6 +45,9 @@ public sealed class TriangularArbitrageStrategy : IArbitrageStrategy
         var tradeAmount = _options.TradeAmountUSDC;
         var quotes = await _aggregator.GetQuotesAsync(pairs, tradeAmount, ct);
 
+        // Temporary diagnostic log
+        _logger.LogInformation("ScanAsync: received {Count} quotes", quotes.Count);
+
         if (!quotes.Any())
         {
             _logger.LogWarning("No quotes received — skipping triangular scan");
@@ -53,10 +56,14 @@ public sealed class TriangularArbitrageStrategy : IArbitrageStrategy
 
         var graph = BuildGraph(quotes);
 
-        _logger.LogDebug("Token graph built — {Tokens} tokens, {Edges} edges",
+        // Temporary diagnostic log
+        _logger.LogInformation("Graph built - {Tokens} tokens, {Edges} edges",
             graph.Tokens.Count, graph.EdgeCount);
 
         var cycles = _cycleDetector.FindProfitableCycles(graph, tradeAmount);
+
+        // Temporary diagnostic log
+        _logger.LogInformation("Cycles found: {Count}", cycles.Count);
 
         if (!cycles.Any())
         {
@@ -64,22 +71,35 @@ public sealed class TriangularArbitrageStrategy : IArbitrageStrategy
             return [];
         }
 
-        var opportunities = cycles.Select(cycle => new ArbitrageOpportunity
+        var opportunities = new List<ArbitrageOpportunity>();
+
+        foreach (var cycle in cycles)
         {
-            InputToken = cycle.TokenA,
-            OutputToken = cycle.TokenA,
-            InputAmountUSDC = cycle.InputAmountUSDC,
-            EstimatedOutputAmountUSDC = cycle.EstimatedOutputUSDC,
-            BuyDex = cycle.EdgeAB.Dex,
-            SellDex = cycle.EdgeCA.Dex,
-            Route = BuildRoute(cycle),
-            StrategyType = StrategyType.Triangular
-        }).ToList();
+            // Diagnostic log to verify profit values are correct
+            _logger.LogInformation(
+                "Opportunity: {Desc} | input: {In:F2} | output: {Out:F6} | profit: {Profit:F6}",
+                cycle.Description,
+                cycle.InputAmountUSDC,
+                cycle.EstimatedOutputUSDC,
+                cycle.EstimatedProfitUSDC);
+
+            opportunities.Add(new ArbitrageOpportunity
+            {
+                InputToken = cycle.TokenA,
+                OutputToken = cycle.TokenA,
+                InputAmountUSDC = cycle.InputAmountUSDC,
+                EstimatedOutputAmountUSDC = cycle.EstimatedOutputUSDC,
+                BuyDex = cycle.EdgeAB.Dex,
+                SellDex = cycle.EdgeCA.Dex,
+                Route = BuildRoute(cycle),
+                StrategyType = StrategyType.Triangular
+            });
+        }
 
         _logger.LogInformation(
-            "Triangular scan complete — {Count} opportunities | best: {Best}",
+            "Triangular scan complete - {Count} opportunities | best: {Best}",
             opportunities.Count,
-            cycles[0].Description);
+            cycles.Count > 0 ? cycles[0].Description : "none");
 
         return opportunities;
     }
@@ -98,36 +118,41 @@ public sealed class TriangularArbitrageStrategy : IArbitrageStrategy
             if (quote.InputAmount <= 0 || quote.OutputAmount <= 0) continue;
 
             var rate = quote.OutputAmount / quote.InputAmount;
-            var reverseRate = quote.InputAmount / quote.OutputAmount;
 
+            // QuoteToken is what we're spending (input)
+            // BaseToken is what we're receiving (output)
+            // Edge goes FROM QuoteToken TO BaseToken
             graph.AddEdge(
-                fromToken: quote.Pair.QuoteToken,
-                toToken: quote.Pair.BaseToken,
+                fromToken: quote.Pair.QuoteToken,  // spending USDC
+                toToken: quote.Pair.BaseToken,   // receiving SOL
                 rate: rate,
                 liquidityUSDC: quote.InputAmount * 10,
                 dex: quote.Dex,
                 ammKey: quote.Dex);
 
-            graph.AddEdge(
-                fromToken: quote.Pair.BaseToken,
-                toToken: quote.Pair.QuoteToken,
-                rate: reverseRate,
-                liquidityUSDC: quote.InputAmount * 10,
-                dex: quote.Dex,
-                ammKey: quote.Dex);
+            //_logger.LogInformation(
+            //    "Edge added: {From} -> {To} @ {Rate} via {Dex}",
+            //    quote.Pair.QuoteToken,
+            //    quote.Pair.BaseToken,
+            //    rate,
+            //    quote.Dex);
         }
+
+        _logger.LogInformation(
+            "Graph tokens: {Tokens}",
+            string.Join(", ", graph.Tokens));
 
         return graph;
     }
 
     private TradeRoute BuildRoute(TriangularCycle cycle)
     {
-        const decimal feeRatePerLeg = 0.003m;
-        var totalFees = cycle.InputAmountUSDC * feeRatePerLeg * 3;
+        //const decimal feeRatePerLeg = 0.003m;
+        //var totalFees = cycle.InputAmountUSDC * feeRatePerLeg * 3;
 
         return new TradeRoute
         {
-            TotalFeeEstimateUSDC = totalFees,
+            TotalFeeEstimateUSDC = 0m,
             EstimatedSlippageBps = _options.SlippageToleranceBps,
             Steps =
             [

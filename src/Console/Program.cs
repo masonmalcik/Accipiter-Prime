@@ -8,7 +8,6 @@ using Accipiter.Infrastructure.Jito;
 using Accipiter.Infrastructure.Persistence;
 using Accipiter.Infrastructure.Persistence.Repoistories;
 using Accipiter.Infrastructure.Persistence.Repositories;
-using Accipiter.Infrastructure.SmartContracts;
 using Accipiter.Infrastructure.Solana.DEX;
 using Accipiter.Infrastructure.Solana.RPC;
 using Accipiter.Infrastructure.Yellowstone;
@@ -18,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using Accipiter.Infrastructure.SmartContract;
 using Solnet.Wallet;
 using Solnet.Wallet.Utilities;
 

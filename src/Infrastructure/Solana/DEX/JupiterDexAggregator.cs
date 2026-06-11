@@ -25,7 +25,10 @@ namespace Accipiter.Infrastructure.Solana.DEX
             ["ETH"] = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
             ["BTC"] = "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
             ["BONK"] = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-            ["JTO"] = "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL"
+            ["JTO"] = "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+            ["WIF"] = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+            ["RAY"] = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+            ["ORCA"] = "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"
         };
 
         // Jupiter uses 6 decimals for USDC, 9 for SOL
@@ -36,7 +39,10 @@ namespace Accipiter.Infrastructure.Solana.DEX
             ["ETH"] = 8,
             ["BTC"] = 6,
             ["BONK"] = 5,
-            ["JTO"] = 9
+            ["JTO"] = 9,
+            ["WIF"] = 6,
+            ["RAY"] = 6,
+            ["ORCA"] = 6
         };
 
         public JupiterDexAggregator(
@@ -78,7 +84,18 @@ namespace Accipiter.Infrastructure.Solana.DEX
                 {
                     var pairQuotes = await GetQuotesForPairAsync(pair, inputAmountUSDC, ct);
                     quotes.AddRange(pairQuotes);
-                    await Task.Delay(500, ct);
+                    await Task.Delay(1000, ct); // increase from 500ms to 1000ms
+                }
+                catch (HttpRequestException ex) when ((int?)ex.StatusCode == 429)
+                {
+                    _logger.LogWarning("Jupiter rate limit hit for {Base}/{Quote} — backing off 15s",
+                        pair.BaseToken, pair.QuoteToken);
+                    await Task.Delay(15000, ct);
+                }
+                catch (HttpRequestException ex) when ((int?)ex.StatusCode == 500)
+                {
+                    _logger.LogWarning("Jupiter 500 error for {Base}/{Quote} — skipping | {Message}",
+                        pair.BaseToken, pair.QuoteToken, ex.Message);
                 }
                 catch (Exception ex)
                 {
@@ -106,12 +123,8 @@ namespace Accipiter.Infrastructure.Solana.DEX
             var inputDecimals = TokenDecimals.GetValueOrDefault(pair.QuoteToken, 6);
             var outputDecimals = TokenDecimals.GetValueOrDefault(pair.BaseToken, 9);
 
-            // Convert USDC decimal amount to raw integer units
             var rawInputAmount = (long)(inputAmountUSDC * (decimal)Math.Pow(10, inputDecimals));
 
-            // Jupiter /quote returns best route across all DEXes it aggregates,
-            // plus the individual route plans broken out by DEX.
-            // We request the top 3 route plans so we can compare DEX prices.
             var url = $"{_jupiterApiUrl}/quote" +
                       $"?inputMint={quoteMint}" +
                       $"&outputMint={baseMint}" +
@@ -119,59 +132,51 @@ namespace Accipiter.Infrastructure.Solana.DEX
                       $"&slippageBps=50" +
                       $"&restrictIntermediateTokens=true";
 
-            _logger.LogDebug("Jupiter quote request: {Url}", url);
-
             _logger.LogInformation("Jupiter URL being called: {Url}", url);
             _logger.LogInformation("Jupiter base URL from config: {Base}", _jupiterApiUrl);
+            _logger.LogInformation("Requesting quote for {Base}/{Quote} | URL: {Url}",
+                pair.BaseToken, pair.QuoteToken, url);
 
-            var response = await _http.GetFromJsonAsync<JupiterQuoteResponse>(url, ct);
+            HttpResponseMessage httpResponse;
+            try
+            {
+                httpResponse = await _http.GetAsync(url, ct);
+                httpResponse.EnsureSuccessStatusCode();
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning("Jupiter API call failed: {Message} | URL: {Url}",
+                    ex.Message, url);
+                return [];
+            }
+
+            var response = await httpResponse.Content
+                .ReadFromJsonAsync<JupiterQuoteResponse>(ct);
 
             if (response is null)
                 return [];
 
-            var results = new List<DexQuote>();
-
-            // Best overall quote — labelled as "Jupiter (Best)"
+            // Convert output amount using correct decimals
             var bestOutputRaw = long.Parse(response.OutAmount);
             var bestOutputAmount = bestOutputRaw / (decimal)Math.Pow(10, outputDecimals);
 
-            results.Add(new DexQuote
-            {
-                Dex = "Jupiter",
-                Pair = pair,
-                InputAmount = inputAmountUSDC,
-                OutputAmount = bestOutputAmount,
-                PriceImpactBps = ParsePriceImpact(response.PriceImpactPct)
-            });
+            _logger.LogDebug("Got quote for {Base}/{Quote} — output: {Output}",
+                pair.BaseToken, pair.QuoteToken, bestOutputAmount);
 
-            // Break out individual DEX legs from route plans for cross-DEX comparison
-            if (response.RoutePlan is { Count: > 0 })
-            {
-                foreach (var route in response.RoutePlan)
+            // Only return the single best Jupiter aggregate quote
+            // Do NOT use individual route plan legs as separate rates
+            // Those represent internal multi-hop routing, not real executable direct swap rates
+            return
+            [
+                new DexQuote
                 {
-                    var dexLabel = route.SwapInfo?.Label ?? "Unknown";
-                    if (dexLabel == "Jupiter") continue; // already added above
-
-                    var routeOutputRaw = long.TryParse(route.SwapInfo?.OutAmount, out var r) ? r : 0;
-                    var routeOutputAmount = routeOutputRaw / (decimal)Math.Pow(10, outputDecimals);
-
-                    if (routeOutputAmount <= 0) continue;
-
-                    results.Add(new DexQuote
-                    {
-                        Dex = dexLabel,
-                        Pair = pair,
-                        InputAmount = inputAmountUSDC,
-                        OutputAmount = routeOutputAmount,
-                        PriceImpactBps = ParsePriceImpact(response.PriceImpactPct)
-                    });
+                    Dex            = "Jupiter",
+                    Pair           = pair,
+                    InputAmount    = inputAmountUSDC,
+                    OutputAmount   = bestOutputAmount,
+                    PriceImpactBps = ParsePriceImpact(response.PriceImpactPct)
                 }
-            }
-
-            _logger.LogDebug("Got {Count} quotes for {Base}/{Quote}",
-                results.Count, pair.BaseToken, pair.QuoteToken);
-
-            return results;
+            ];
         }
 
         private static decimal ParsePriceImpact(string? pct)

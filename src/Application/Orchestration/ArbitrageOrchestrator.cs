@@ -52,6 +52,7 @@ namespace Accipiter.Application.Orchestration
             _options = options.Value;
             _contractClient = contractClient;
             _circuitBreaker = circuitBreaker;
+            _rpcClient = rpcClient;
         }
 
         public async Task RunTickAsync(CancellationToken ct)

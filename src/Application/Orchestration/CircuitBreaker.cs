@@ -26,7 +26,6 @@ public sealed class CircuitBreaker
     private readonly Lock _lock = new();
 
     private readonly CircuitBreakerOptions _options;
-    private readonly IWalletSnapshotRepository _walletRepo;
     private readonly ILogger<CircuitBreaker> _logger;
 
     public CircuitState State => _state;
@@ -35,11 +34,9 @@ public sealed class CircuitBreaker
 
     public CircuitBreaker(
         IOptions<CircuitBreakerOptions> options,
-        IWalletSnapshotRepository walletRepo,
         ILogger<CircuitBreaker> logger)
     {
         _options = options.Value;
-        _walletRepo = walletRepo;
         _logger = logger;
     }
 

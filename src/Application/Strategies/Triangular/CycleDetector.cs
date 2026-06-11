@@ -12,12 +12,12 @@ public sealed class CycleDetector
 {
     // Fee per swap leg — Orca Whirlpool / Raydium CLMM typically 0.01%-0.30%
     // Using 0.3% (30 bps) as conservative estimate
-    private const decimal FeePerLeg = 0.003m;
+    private const decimal FeePerLeg = 0.0001m; // 0.01% — Orca lowest tier
     private const decimal FeeFactor = 1m - FeePerLeg;  // 0.997 per leg
     private const decimal ThreeLegFeeFactor =           // 0.991 after 3 legs
         FeeFactor * FeeFactor * FeeFactor;
 
-    private const decimal MinLiquidityUSDC = 10_000m;  // ignore illiquid pools
+    private const decimal MinLiquidityUSDC = 1_000m; // lower from 10,000
     private const int MaxCyclesPerScan = 50;            // cap to avoid overload
 
     private readonly ILogger<CycleDetector> _logger;
@@ -75,11 +75,27 @@ public sealed class CycleDetector
                 // Apply three-leg fee factor
                 var netRateProduct = grossRateProduct * ThreeLegFeeFactor;
 
+                //if (grossRateProduct > 0.98m) // log near-miss cycles
+                //{
+                //    _logger.LogInformation(
+                //        "Near-miss cycle: USDC→{B}→{C}→USDC | gross: {Gross:F6} | net: {Net:F6} | " +
+                //        "dexes: {D1}/{D2}/{D3}",
+                //        tokenB, tokenC,
+                //        grossRateProduct, netRateProduct,
+                //        edgeAB.Dex, edgeBC.Dex, edgeCA.Dex);
+                //}
+
                 if (netRateProduct <= 1.0m) continue; // not profitable after fees
 
                 // Calculate estimated profit in USDC
                 var outputAmount = inputAmountUSDC * netRateProduct;
                 var estimatedProfit = outputAmount - inputAmountUSDC;
+
+                // Diagnostic log
+                //_logger.LogInformation(
+                //    "Cycle calc: USDC→{B}→{C}→USDC | gross: {Gross:F6} | net: {Net:F6} | " +
+                //    "output: {Out:F6} | profit: {Profit:F6}",
+                //    tokenB, tokenC, grossRateProduct, netRateProduct, outputAmount, estimatedProfit);
 
                 cycles.Add(new TriangularCycle
                 {

@@ -10,6 +10,7 @@ using Solnet.Wallet;
 using Solnet.Wallet.Bip39;
 using System.Text;
 using System.Text.Json;
+using Solnet.Programs;
 
 namespace Accipiter.Infrastructure.SmartContract;
 
@@ -316,7 +317,7 @@ public sealed class SmartContractClient : ISmartContractClient
         // Build account metas for the instruction
         var keys = new List<AccountMeta>
         {
-            AccountMeta.Writable(new PublicKey(authority.PublicKey), true),
+            AccountMeta.Writable(new PublicKey(authority.PublicKey.ToString()), true),
             AccountMeta.Writable(new PublicKey(usdcTokenAccount), false),
             AccountMeta.ReadOnly(new PublicKey(steps[0].ProgramId), false), // dex_program_a
             AccountMeta.ReadOnly(new PublicKey(steps[1].ProgramId), false), // dex_program_b
@@ -331,7 +332,7 @@ public sealed class SmartContractClient : ISmartContractClient
 
         var tx = new TransactionBuilder()
             .SetRecentBlockHash(recentBlockhash)
-            .SetFeePayer(new PublicKey(authority.PublicKey))
+            .SetFeePayer(new PublicKey(authority.PublicKey.ToString()))
             .AddInstruction(new TransactionInstruction
             {
                 ProgramId = new PublicKey(programId),

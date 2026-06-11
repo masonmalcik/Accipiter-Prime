@@ -18,7 +18,7 @@ namespace Accipiter.Infrastructure.Solana.RPC
         private readonly ILogger<SolanaRpcClient> _logger;
 
         // Token mint addresses (Solana mainnet)
-        private const string UsdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+        private readonly string _usdcMint;
 
         public SolanaRpcClient(IConfiguration config, ILogger<SolanaRpcClient> logger)
         {
@@ -27,6 +27,9 @@ namespace Accipiter.Infrastructure.Solana.RPC
 
             _walletAddress = config["Solana:WalletAddress"]
                 ?? throw new InvalidOperationException("Solana:WalletAddress is not configured.");
+
+            _usdcMint = config["Solana:UsdcMint"]
+                ?? "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
             _client = ClientFactory.GetClient(rpcUrl);
             _logger = logger;
@@ -45,7 +48,7 @@ namespace Accipiter.Infrastructure.Solana.RPC
             // USDC token account balance
             var tokenResponse = await _client.GetTokenAccountsByOwnerAsync(
                 _walletAddress,
-                tokenMintPubKey: UsdcMint);
+                tokenMintPubKey: _usdcMint);
 
             var usdcBalance = 0m;
             if (tokenResponse.Result?.Value is { Count: > 0 } accounts)
