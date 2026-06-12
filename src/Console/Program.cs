@@ -96,6 +96,18 @@ try
         })
         .Build();
 
+    using (var scope = host.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AccipitersDbContext>();
+        await db.Database.MigrateAsync();
+
+        // Reset circuit breaker on startup
+        var circuitBreaker = scope.ServiceProvider.GetRequiredService<CircuitBreaker>();
+        circuitBreaker.Reset();
+
+        Log.Information("Database ready");
+    }
+
     // Ensure DB is created and migrations are applied
     using (var scope = host.Services.CreateScope())
     {

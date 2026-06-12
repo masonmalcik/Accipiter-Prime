@@ -87,6 +87,17 @@ public sealed class CycleDetector
 
                 if (netRateProduct <= 1.0m) continue; // not profitable after fees
 
+                // Sanity check — reject cycles with unrealistic profit
+                // Real triangular arb should never exceed 5% profit
+                if (netRateProduct > 1.05m)
+                {
+                    _logger.LogWarning(
+                        "Rejecting suspicious cycle USDC→{B}→{C}→USDC — " +
+                        "net rate {Rate:F6} exceeds 5% threshold (likely stale/bad quote)",
+                        tokenB, tokenC, netRateProduct);
+                    continue;
+                }
+
                 // Calculate estimated profit in USDC
                 var outputAmount = inputAmountUSDC * netRateProduct;
                 var estimatedProfit = outputAmount - inputAmountUSDC;

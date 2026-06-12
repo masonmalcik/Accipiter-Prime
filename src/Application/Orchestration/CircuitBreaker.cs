@@ -40,6 +40,19 @@ public sealed class CircuitBreaker
         _logger = logger;
     }
 
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            _state = CircuitState.Closed;
+            _openedAt = null;
+            _consecutiveFailures = 0;
+            _consecutiveReverts = 0;
+            _sessionLossUSDC = 0m;
+            _logger.LogInformation("Circuit breaker manually reset");
+        }
+    }
+
     /// <summary>
     /// Call after every successful trade execution.
     /// </summary>

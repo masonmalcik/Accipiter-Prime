@@ -70,15 +70,18 @@ namespace Accipiter.Application.Orchestration
 
             _logger.LogDebug("Orchestrator tick — mode: {Mode}", _options.Mode);
 
-            // Check wallet balance before trading
-            var wallet = await _rpcClient.GetWalletStateAsync(ct);
-            if (wallet.UsdcBalance < _options.MinWalletBalanceUSDC)
+            // Only check wallet balance in live mode
+            if (_options.Mode == ExecutionMode.Live)
             {
-                _logger.LogWarning(
-                    "Wallet balance {Balance:C} below minimum {Min:C} — skipping tick",
-                    wallet.UsdcBalance, _options.MinWalletBalanceUSDC);
-                _circuitBreaker.RecordFailure("Wallet balance below minimum");
-                return;
+                var wallet = await _rpcClient.GetWalletStateAsync(ct);
+                if (wallet.UsdcBalance < _options.MinWalletBalanceUSDC)
+                {
+                    _logger.LogWarning(
+                        "Wallet balance {Balance:C} below minimum {Min:C} — skipping tick",
+                        wallet.UsdcBalance, _options.MinWalletBalanceUSDC);
+                    _circuitBreaker.RecordFailure("Wallet balance below minimum");
+                    return;
+                }
             }
 
             var pairs = _options.WatchedPairs
