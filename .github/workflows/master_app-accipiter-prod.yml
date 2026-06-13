@@ -22,10 +22,10 @@ jobs:
         run: echo "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true" >> $env:GITHUB_ENV
 
       - name: Build with dotnet
-        run: dotnet build src/Accipiter.Console/Accipiter.Console.csproj --configuration Release
+        run: dotnet build src/Console/Accipiter.Console.csproj --configuration Release
 
       - name: dotnet publish
-        run: dotnet publish src/Accipiter.Console/Accipiter.Console.csproj -c Release -o "${{env.DOTNET_ROOT}}/myapp"
+        run: dotnet publish src/Console/Accipiter.Console.csproj -c Release -o "${{env.DOTNET_ROOT}}/myapp"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
